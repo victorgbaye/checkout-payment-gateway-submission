@@ -33,7 +33,7 @@ func (h *PaymentsHandler) GetHandler() http.HandlerFunc {
 				w.WriteHeader(http.StatusInternalServerError)
 			}
 		} else {
-			w.WriteHeader(http.StatusNoContent)
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}
 }
