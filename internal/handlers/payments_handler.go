@@ -4,17 +4,22 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/models"
+	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/service"
+
 	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/repository"
 	"github.com/go-chi/chi/v5"
 )
 
 type PaymentsHandler struct {
 	storage *repository.PaymentsRepository
+	service *service.PaymentService
 }
 
-func NewPaymentsHandler(storage *repository.PaymentsRepository) *PaymentsHandler {
+func NewPaymentsHandler(storage *repository.PaymentsRepository, paymentService *service.PaymentService) *PaymentsHandler {
 	return &PaymentsHandler{
 		storage: storage,
+		service: paymentService,
 	}
 }
 
@@ -38,7 +43,20 @@ func (h *PaymentsHandler) GetHandler() http.HandlerFunc {
 	}
 }
 
-func (ph *PaymentsHandler) PostHandler() http.HandlerFunc {
-	//TODO
-	return nil
+func (h *PaymentsHandler) PostHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var request models.PostPaymentRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid payment JSON", http.StatusBadRequest)
+			return
+		}
+		payment, err := h.service.ProcessPayment(r.Context(), request)
+		if err != nil {
+			http.Error(w, "unable to process payment", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(payment)
+	}
 }
