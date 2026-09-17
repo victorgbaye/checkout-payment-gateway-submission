@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/bank"
 	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/service"
 	"github.com/stretchr/testify/require"
 	"net/http"
@@ -133,6 +134,7 @@ func testPostPaymentBankFailure(t *testing.T) {
 
 func TestPostPaymentHandler(t *testing.T) {
 	t.Run("Created", testPostPaymentCreated)
+	t.Run("BankErrors", testPostPaymentBankErrors)
 	t.Run("MalformedJSON", testPostPaymentMalformedJSON)
 	t.Run("BankFailure", testPostPaymentBankFailure)
 	t.Run("RejectsInvalidAmount", func(t *testing.T) {
@@ -162,4 +164,54 @@ type countingBank struct{ calls int }
 func (b *countingBank) Authorize(context.Context, models.PostPaymentRequest) (bool, error) {
 	b.calls++
 	return true, nil
+}
+
+func testPostPaymentBankErrors(t *testing.T) {
+	cases := []struct {
+		name           string
+		upstreamStatus int
+		upstreamBody   string
+		wantStatus     int
+		wantError      string
+	}{
+		{"Unavailable", 503, `{}`, 503, "bank unavailable"},
+		{"BankServerError", 500, `{}`, 503, "bank unavailable"},
+		{"UnexpectedStatus", 400, `{"error":"private bank details"}`, 502, "invalid bank response"},
+		{"MalformedJSON", 200, `not JSON`, 502, "invalid bank response"},
+		{"MissingDecision", 200, `{}`, 502, "invalid bank response"},
+		{"NullDecision", 200, `{"authorized":null}`, 502, "invalid bank response"},
+		{"WrongDecisionType", 200, `{"authorized":"yes"}`, 502, "invalid bank response"},
+		{"TrailingJSON", 200, `{"authorized":true}{}`, 502, "invalid bank response"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.upstreamStatus)
+				_, _ = w.Write([]byte(tt.upstreamBody))
+			}))
+			defer server.Close()
+			checkBankErrorResponse(t, bank.NewClient(server.URL), tt.wantStatus, tt.wantError)
+		})
+	}
+	t.Run("ConnectionFailure", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		server.Close()
+		checkBankErrorResponse(t, bank.NewClient(server.URL), 503, "bank unavailable")
+	})
+}
+
+func checkBankErrorResponse(t *testing.T, client service.Bank, wantStatus int, wantError string) {
+	t.Helper()
+	repo := repository.NewPaymentsRepository()
+	handler := NewPaymentsHandler(repo, service.NewPaymentService(repo, client))
+	body := fmt.Sprintf(`{"card_number":"2222405343248877","expiry_month":12,"expiry_year":%d,"currency":"GBP","amount":100,"cvv":"123"}`, time.Now().Year()+1)
+	request := httptest.NewRequest(http.MethodPost, "/api/payments", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.PostHandler()(recorder, request)
+	require.Equal(t, wantStatus, recorder.Code, recorder.Body.String())
+	assert.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+	var response map[string]string
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, map[string]string{"error": wantError}, response)
 }

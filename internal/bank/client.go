@@ -4,12 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/models"
+)
+
+var (
+	ErrUnavailable     = errors.New("bank unavailable")
+	ErrInvalidResponse = errors.New("invalid bank response")
 )
 
 type Client struct {
@@ -72,27 +79,32 @@ func (c *Client) Authorize(
 
 	response, err := c.http.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("call bank: %w", err)
+		return false, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer response.Body.Close()
 
+	if response.StatusCode >= 500 {
+		return false, fmt.Errorf("%w: HTTP %d", ErrUnavailable, response.StatusCode)
+	}
 	if response.StatusCode != http.StatusOK {
-		return false, fmt.Errorf(
-			"bank returned HTTP %d",
-			response.StatusCode,
-		)
+		return false, fmt.Errorf("%w: HTTP %d", ErrInvalidResponse, response.StatusCode)
 	}
 
 	var result struct {
 		Authorized *bool `json:"authorized"`
 	}
 
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-		return false, fmt.Errorf("decode bank response: %w", err)
+	decoder := json.NewDecoder(response.Body)
+	if err := decoder.Decode(&result); err != nil {
+		return false, fmt.Errorf("%w: %w", ErrInvalidResponse, err)
 	}
 
 	if result.Authorized == nil {
-		return false, fmt.Errorf("bank response is missing authorized")
+		return false, fmt.Errorf("%w: missing authorized", ErrInvalidResponse)
+	}
+
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return false, ErrInvalidResponse
 	}
 
 	return *result.Authorized, nil
