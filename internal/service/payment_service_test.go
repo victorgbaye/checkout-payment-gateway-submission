@@ -125,3 +125,41 @@ func TestProcessPaymentValidBoundaries(t *testing.T) {
 		})
 	}
 }
+
+// A decline is a valid bank decision, not a bank communication error.
+type decliningBank struct {
+	calls int
+}
+
+func (b *decliningBank) Authorize(context.Context, models.PostPaymentRequest) (bool, error) {
+	b.calls++
+	return false, nil
+}
+
+func TestProcessPaymentDeclinedIsSavedAndRetrievable(t *testing.T) {
+	repo := repository.NewPaymentsRepository()
+	bank := &decliningBank{}
+	paymentService := NewPaymentService(repo, bank)
+	request := validPaymentRequest()
+	request.CardNumber = "2222405343240002"
+
+	payment, err := paymentService.ProcessPayment(context.Background(), request)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, bank.calls)
+	require.NotEmpty(t, payment.Id)
+	assert.Equal(t, models.PostPaymentResponse{
+		Id:                 payment.Id,
+		PaymentStatus:      "Declined",
+		CardNumberLastFour: "0002",
+		ExpiryMonth:        request.ExpiryMonth,
+		ExpiryYear:         request.ExpiryYear,
+		Currency:           request.Currency,
+		Amount:             request.Amount,
+	}, payment)
+
+	stored := repo.GetPayment(payment.Id)
+	require.NotNil(t, stored, "declined payments must be saved")
+	assert.Equal(t, payment, *stored)
+	assert.Equal(t, 1, bank.calls, "retrieval must not contact the bank again")
+}
