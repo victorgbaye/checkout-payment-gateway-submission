@@ -1,4 +1,4 @@
-# Instructions for candidates
+# Tmplementation documantation & Instructions for running the app
 
 This is the Go version of the Payment Gateway challenge. If you haven't already read the [README.md](https://github.com/cko-recruitment/) in the root of this organisation, please do so now. 
 
