@@ -5,12 +5,12 @@ import (
 )
 
 type PaymentsRepository struct {
-	payments []models.PostPaymentResponse
+	payments map[string]models.PostPaymentResponse
 }
 
 func NewPaymentsRepository() *PaymentsRepository {
 	return &PaymentsRepository{
-		payments: []models.PostPaymentResponse{},
+		payments: map[string]models.PostPaymentResponse{},
 	}
 }
 
@@ -23,6 +23,7 @@ func (ps *PaymentsRepository) GetPayment(id string) *models.PostPaymentResponse 
 	return nil
 }
 
-func (ps *PaymentsRepository) AddPayment(payment models.PostPaymentResponse) {
-	ps.payments = append(ps.payments, payment)
+func (ps *PaymentsRepository) AddPayment(payment models.PostPaymentResponse) (models.PostPaymentResponse, error) {
+	ps.payments[payment.Id] = payment
+	return payment, nil
 }
