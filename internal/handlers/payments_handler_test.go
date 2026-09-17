@@ -67,6 +67,7 @@ func TestGetPaymentHandler(t *testing.T) {
 
 		// Check the HTTP status code in the response
 		assert.Equal(t, http.StatusNotFound, w.Code)
+		assertJSONError(t, w, "payment not found")
 	})
 }
 
@@ -130,10 +131,12 @@ func testPostPaymentBankFailure(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler.PostHandler()(recorder, httptest.NewRequest(http.MethodPost, "/api/payments", strings.NewReader(body)))
 	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	assertJSONError(t, recorder, "unable to process payment")
 }
 
 func TestPostPaymentHandler(t *testing.T) {
 	t.Run("Created", testPostPaymentCreated)
+	t.Run("RequestBody", testPostPaymentRequestBody)
 	t.Run("BankErrors", testPostPaymentBankErrors)
 	t.Run("MalformedJSON", testPostPaymentMalformedJSON)
 	t.Run("BankFailure", testPostPaymentBankFailure)
@@ -214,4 +217,64 @@ func checkBankErrorResponse(t *testing.T, client service.Bank, wantStatus int, w
 	var response map[string]string
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, map[string]string{"error": wantError}, response)
+}
+
+func assertJSONError(t *testing.T, recorder *httptest.ResponseRecorder, message string) {
+	t.Helper()
+	assert.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+	var body map[string]string
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+	assert.Equal(t, message, body["error"])
+}
+
+func testPostPaymentRequestBody(t *testing.T) {
+	valid := fmt.Sprintf(`{"card_number":"2222405343248877","expiry_month":12,"expiry_year":%d,"currency":"GBP","amount":100,"cvv":"123"}`, time.Now().Year()+1)
+	cases := []struct {
+		name, body string
+		status     int
+	}{
+		{"Empty", "", 400},
+		{"WhitespaceOnly", "   ", 400},
+		{"Malformed", "{", 400},
+		{"Null", "null", 400},
+		{"Array", "[]", 400},
+		{"String", `"hello"`, 400},
+		{"MissingFields", "{}", 400},
+		{"WrongType", strings.Replace(valid, `"amount":100`, `"amount":"100"`, 1), 400},
+		{"FractionalAmount", strings.Replace(valid, `"amount":100`, `"amount":1.5`, 1), 400},
+		{"UnknownField", strings.Replace(valid, `"amount":100`, `"unexpected":"secret","amount":100`, 1), 400},
+		{"MultipleObjects", valid + "{}", 400},
+		{"TrailingNull", valid + " null", 400},
+		{"TrailingGarbage", valid + " secret", 400},
+		{"OversizedObject", `{"card_number":"` + strings.Repeat("1", 5000) + `"}`, 413},
+		{"OversizedTrailingWhitespace", valid + strings.Repeat(" ", 5000), 413},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := repository.NewPaymentsRepository()
+			bank := &countingBank{}
+			handler := NewPaymentsHandler(repo, service.NewPaymentService(repo, bank))
+			request := httptest.NewRequest(http.MethodPost, "/api/payments", strings.NewReader(tt.body))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			handler.PostHandler()(recorder, request)
+			assert.Zero(t, bank.calls)
+			require.Equal(t, tt.status, recorder.Code, recorder.Body.String())
+			assert.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+			var response map[string]string
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.NotEmpty(t, response["error"])
+			assert.Equal(t, "Rejected", response["payment_status"])
+			assert.NotContains(t, recorder.Body.String(), "secret")
+		})
+	}
+	t.Run("TrailingWhitespaceIsValid", func(t *testing.T) {
+		repo := repository.NewPaymentsRepository()
+		bank := &countingBank{}
+		handler := NewPaymentsHandler(repo, service.NewPaymentService(repo, bank))
+		recorder := httptest.NewRecorder()
+		handler.PostHandler()(recorder, httptest.NewRequest(http.MethodPost, "/api/payments", strings.NewReader(valid+" \n\t")))
+		assert.Equal(t, http.StatusCreated, recorder.Code, recorder.Body.String())
+		assert.Equal(t, 1, bank.calls)
+	})
 }

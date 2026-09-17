@@ -3,13 +3,13 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/bank"
+	"io"
 	"net/http"
 
+	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/bank"
 	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/models"
-	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/service"
-
 	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/repository"
+	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -19,67 +19,80 @@ type PaymentsHandler struct {
 }
 
 func NewPaymentsHandler(storage *repository.PaymentsRepository, paymentService *service.PaymentService) *PaymentsHandler {
-	return &PaymentsHandler{
-		storage: storage,
-		service: paymentService,
-	}
+	return &PaymentsHandler{storage: storage, service: paymentService}
 }
 
-// GetHandler returns an http.HandlerFunc that handles HTTP GET requests.
-// It retrieves a payment record by its ID from the storage.
-// The ID is expected to be part of the URL.
 func (h *PaymentsHandler) GetHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		payment := h.storage.GetPayment(id)
-
-		if payment != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(payment); err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-			}
-		} else {
-			w.WriteHeader(http.StatusNotFound)
+		payment := h.storage.GetPayment(chi.URLParam(r, "id"))
+		if payment == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "payment not found"})
+			return
 		}
+		writeJSON(w, http.StatusOK, payment)
 	}
 }
 
 func (h *PaymentsHandler) PostHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var request models.PostPaymentRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			http.Error(w, "invalid payment JSON", http.StatusBadRequest)
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		var request *models.PostPaymentRequest
+		if err := decoder.Decode(&request); err != nil {
+			rejectBody(w, err)
 			return
 		}
-		payment, err := h.service.ProcessPayment(r.Context(), request)
+		if request == nil {
+			rejectBody(w, nil)
+			return
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			rejectBody(w, err)
+			return
+		}
+		payment, err := h.service.ProcessPayment(r.Context(), *request)
 		if err != nil {
-			if errors.Is(err, service.ErrValidation) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]string{
-					"error":          err.Error(),
-					"payment_status": "Rejected",
-				})
-				return
+			status := http.StatusInternalServerError
+			body := map[string]string{"error": "unable to process payment"}
+			switch {
+			case errors.Is(err, service.ErrValidation):
+				status = http.StatusBadRequest
+				body["error"] = err.Error()
+				body["payment_status"] = "Rejected"
+			case errors.Is(err, bank.ErrUnavailable):
+				status = http.StatusServiceUnavailable
+				body["error"] = "bank unavailable"
+			case errors.Is(err, bank.ErrInvalidResponse):
+				status = http.StatusBadGateway
+				body["error"] = "invalid bank response"
 			}
-			if errors.Is(err, bank.ErrUnavailable) || errors.Is(err, bank.ErrInvalidResponse) {
-				status := http.StatusBadGateway
-				message := "invalid bank response"
-				if errors.Is(err, bank.ErrUnavailable) {
-					status = http.StatusServiceUnavailable
-					message = "bank unavailable"
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(status)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
-				return
-			}
-			http.Error(w, "unable to process payment", http.StatusInternalServerError)
+			writeJSON(w, status, body)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(payment)
+		writeJSON(w, http.StatusCreated, payment)
 	}
+}
+
+func rejectBody(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	message := "body must contain one valid payment JSON object"
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		status = http.StatusRequestEntityTooLarge
+		message = "request body exceeds 4096 bytes"
+	}
+	writeJSON(w, status, map[string]string{"error": message, "payment_status": "Rejected"})
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	// Encode before sending headers so encoding errors can still return HTTP 500.
+	body, err := json.Marshal(value)
+	if err != nil {
+		status = http.StatusInternalServerError
+		body = []byte(`{"error":"unable to encode response"}`)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(append(body, '\n'))
 }
