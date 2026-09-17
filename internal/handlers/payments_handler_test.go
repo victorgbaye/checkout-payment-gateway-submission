@@ -69,7 +69,7 @@ func TestGetPaymentHandler(t *testing.T) {
 	})
 }
 
-func TestPostPaymentHandler(t *testing.T) {
+func testPostPaymentCreated(t *testing.T) {
 
 	body := strings.NewReader(fmt.Sprintf(`{
 		"card_number": "2222405343248877",
@@ -114,7 +114,7 @@ func (failingBank) Authorize(context.Context, models.PostPaymentRequest) (bool, 
 	return false, errors.New("bank unavailable")
 }
 
-func TestPostPaymentHandlerMalformedJSON(t *testing.T) {
+func testPostPaymentMalformedJSON(t *testing.T) {
 	repo := repository.NewPaymentsRepository()
 	handler := NewPaymentsHandler(repo, service.NewPaymentService(repo, approvingBank{}))
 	recorder := httptest.NewRecorder()
@@ -122,11 +122,44 @@ func TestPostPaymentHandlerMalformedJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
-func TestPostPaymentHandlerBankFailure(t *testing.T) {
+func testPostPaymentBankFailure(t *testing.T) {
 	repo := repository.NewPaymentsRepository()
 	handler := NewPaymentsHandler(repo, service.NewPaymentService(repo, failingBank{}))
 	body := fmt.Sprintf(`{"card_number":"2222405343248877","expiry_month":12,"expiry_year":%d,"currency":"GBP","amount":100,"cvv":"123"}`, time.Now().Year()+1)
 	recorder := httptest.NewRecorder()
 	handler.PostHandler()(recorder, httptest.NewRequest(http.MethodPost, "/api/payments", strings.NewReader(body)))
 	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+}
+
+func TestPostPaymentHandler(t *testing.T) {
+	t.Run("Created", testPostPaymentCreated)
+	t.Run("MalformedJSON", testPostPaymentMalformedJSON)
+	t.Run("BankFailure", testPostPaymentBankFailure)
+	t.Run("RejectsInvalidAmount", func(t *testing.T) {
+		repo := repository.NewPaymentsRepository()
+		bank := &countingBank{}
+		handler := NewPaymentsHandler(repo, service.NewPaymentService(repo, bank))
+		body := fmt.Sprintf(`{"card_number":"2222405343248877","expiry_month":12,"expiry_year":%d,"currency":"GBP","amount":-100,"cvv":"123"}`, time.Now().Year()+1)
+		request := httptest.NewRequest(http.MethodPost, "/api/payments", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		handler.PostHandler()(recorder, request)
+		assert.Zero(t, bank.calls, "invalid payments must not reach the bank")
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+		assert.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+		var response struct {
+			Error         string `json:"error"`
+			PaymentStatus string `json:"payment_status"`
+		}
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "Rejected", response.PaymentStatus)
+		assert.Contains(t, response.Error, "amount must be positive")
+	})
+}
+
+type countingBank struct{ calls int }
+
+func (b *countingBank) Authorize(context.Context, models.PostPaymentRequest) (bool, error) {
+	b.calls++
+	return true, nil
 }

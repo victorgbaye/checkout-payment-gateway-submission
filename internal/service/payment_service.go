@@ -5,11 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/models"
 	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/repository"
 )
+
+var ErrValidation = errors.New("invalid payment")
 
 type Bank interface {
 	Authorize(
@@ -38,7 +41,7 @@ func (p *PaymentService) ProcessPayment(
 	request models.PostPaymentRequest,
 ) (models.PostPaymentResponse, error) {
 	if err := validatePayment(request); err != nil {
-		return models.PostPaymentResponse{}, err
+		return models.PostPaymentResponse{}, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 
 	var idBytes [16]byte

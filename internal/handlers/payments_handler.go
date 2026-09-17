@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/cko-recruitment/payment-gateway-challenge-go/internal/models"
@@ -52,6 +53,15 @@ func (h *PaymentsHandler) PostHandler() http.HandlerFunc {
 		}
 		payment, err := h.service.ProcessPayment(r.Context(), request)
 		if err != nil {
+			if errors.Is(err, service.ErrValidation) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error":          err.Error(),
+					"payment_status": "Rejected",
+				})
+				return
+			}
 			http.Error(w, "unable to process payment", http.StatusInternalServerError)
 			return
 		}
