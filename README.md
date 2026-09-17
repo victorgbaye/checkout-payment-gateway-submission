@@ -13,7 +13,7 @@ This is the Go version of the Payment Gateway challenge. If you haven't already 
   - [Retrieve a payment](#retrieve-a-payment)
   - [Rejected input and bank failures](#rejected-input-and-bank-failures)
 - [Validation and assumptions](#validation-and-assumptions)
-- [Design](#design)
+- [Key design considerations](#key-design-considerations)
   - [Scope and limitations](#scope-and-limitations)
 - [Tests and verification](#tests-and-verification)
 
@@ -183,16 +183,9 @@ payment handlers, not the router's default unknown-route/method responses.
 - Payment IDs are independently generated random 128-bit values, encoded as hex.
 - No Luhn check is added; the assessment specifies digit and length validation.
 
-## Design
+## Key design considerations
 
-```text
-POST request -> Handler -> Service -> Bank HTTP client -> Supplied simulator
-                              |
-                              v
-                       Memory repository
-
-GET request  -> Handler -> Memory repository
-```
+![Payment processing and retrieval flow](docs/payment-processing-flow.png)
 
 - **Handlers** decode HTTP requests, call the service for processing, map errors
   to HTTP statuses, and write JSON. GET currently reads the repository directly.
