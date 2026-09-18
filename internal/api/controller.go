@@ -15,6 +15,10 @@ type pong struct {
 }
 
 // PingHandler returns an http.HandlerFunc that handles HTTP Ping GET requests.
+// @Summary Check gateway health
+// @Produce json
+// @Success 200 {object} pong
+// @Router /ping [get]
 func (a *Api) PingHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

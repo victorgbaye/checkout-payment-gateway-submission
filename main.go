@@ -23,7 +23,7 @@ var (
 //	@host		localhost:8090
 //	@BasePath	/
 
-// @securityDefinitions.basic	BasicAuth
+// @version 1.0
 func main() {
 	fmt.Printf("version %s, commit %s, built at %s\n", version, commit, date)
 	docs.SwaggerInfo.Version = version

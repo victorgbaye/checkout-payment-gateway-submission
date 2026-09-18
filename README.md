@@ -1,4 +1,4 @@
-# Tmplementation documantation & Instructions for running the app
+# Implementation documantation & Instructions for running the app
 
 This is the Go version of the Payment Gateway challenge. If you haven't already read the [README.md](https://github.com/cko-recruitment/) in the root of this organisation, please do so now. 
 
@@ -214,9 +214,19 @@ and repeated POSTs create separate payments. Automatic retries are deliberately
 absent: after a timeout, the bank may already have processed a payment. Production
 idempotency and reconciliation would require additional design.
 
-The template Swagger UI remains available at `/swagger/index.html`, but its
-existing generated specification has not been updated for these payment routes.
-The endpoint examples and contract in this README describe the implemented API.
+Swagger UI at `http://localhost:8090/swagger/index.html` documents `/ping`,
+`POST /api/payments`, and `GET /api/payments/{id}`, including request schemas,
+examples, validation constraints and error responses. Start the bank simulator
+before using **Try it out** for payment processing. No authentication is configured.
+
+The specification is generated from Go annotations. After changing the API, run:
+
+```sh
+go run -mod=mod github.com/swaggo/swag/cmd/swag init
+```
+
+Commit the regenerated `docs/docs.go`, `docs/swagger.json` and `docs/swagger.yaml`
+together. Restart the gateway to serve the updated specification.
 
 ## Tests and verification
 

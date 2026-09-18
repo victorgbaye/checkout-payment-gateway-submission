@@ -22,6 +22,15 @@ func NewPaymentsHandler(storage *repository.PaymentsRepository, paymentService *
 	return &PaymentsHandler{storage: storage, service: paymentService}
 }
 
+// GetHandler retrieves a previously processed payment.
+// @Summary Retrieve a payment
+// @Tags payments
+// @Produce json
+// @Param id path string true "Gateway payment ID"
+// @Success 200 {object} models.PostPaymentResponse
+// @Failure 404 {object} models.ErrorResponse "Payment not found"
+// @Failure 500 {object} models.ErrorResponse "Internal error"
+// @Router /api/payments/{id} [get]
 func (h *PaymentsHandler) GetHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		payment := h.storage.GetPayment(chi.URLParam(r, "id"))
@@ -33,6 +42,20 @@ func (h *PaymentsHandler) GetHandler() http.HandlerFunc {
 	}
 }
 
+// PostHandler processes a payment through the supplied bank simulator.
+// @Summary Process a payment
+// @Description Accepts one JSON object, at most 4096 bytes. Unknown fields are rejected. Expiry is valid through the end of its month in UTC. Authorized and declined payments are both stored and returned with HTTP 201. Invalid input never reaches the bank.
+// @Tags payments
+// @Accept json
+// @Produce json
+// @Param payment body models.PostPaymentRequest true "Payment details"
+// @Success 201 {object} models.PostPaymentResponse "Authorized or declined payment"
+// @Failure 400 {object} models.RejectedPaymentResponse "Invalid JSON or payment details"
+// @Failure 413 {object} models.RejectedPaymentResponse "Body exceeds 4096 bytes"
+// @Failure 500 {object} models.ErrorResponse "Internal processing error"
+// @Failure 502 {object} models.ErrorResponse "Invalid bank response"
+// @Failure 503 {object} models.ErrorResponse "Bank unavailable"
+// @Router /api/payments [post]
 func (h *PaymentsHandler) PostHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 4096)

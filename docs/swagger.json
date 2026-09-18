@@ -3,21 +3,127 @@
     "info": {
         "description": "Interview challenge for building a Payment Gateway - Go version",
         "title": "Payment Gateway Challenge Go",
-        "contact": {}
+        "contact": {},
+        "version": "1.0"
     },
     "host": "localhost:8090",
     "basePath": "/",
     "paths": {
-        "/ping": {
+        "/api/payments": {
+            "post": {
+                "description": "Accepts one JSON object, at most 4096 bytes. Unknown fields are rejected. Expiry is valid through the end of its month in UTC. Authorized and declined payments are both stored and returned with HTTP 201. Invalid input never reaches the bank.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payments"
+                ],
+                "summary": "Process a payment",
+                "parameters": [
+                    {
+                        "description": "Payment details",
+                        "name": "payment",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.PostPaymentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Authorized or declined payment",
+                        "schema": {
+                            "$ref": "#/definitions/models.PostPaymentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid JSON or payment details",
+                        "schema": {
+                            "$ref": "#/definitions/models.RejectedPaymentResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Body exceeds 4096 bytes",
+                        "schema": {
+                            "$ref": "#/definitions/models.RejectedPaymentResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal processing error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Invalid bank response",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Bank unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/payments/{id}": {
             "get": {
                 "produces": [
                     "application/json"
+                ],
+                "tags": [
+                    "payments"
+                ],
+                "summary": "Retrieve a payment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Gateway payment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/main.Pong"
+                            "$ref": "#/definitions/models.PostPaymentResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Payment not found",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ping": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Check gateway health",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.pong"
                         }
                     }
                 }
@@ -25,18 +131,130 @@
         }
     },
     "definitions": {
-        "main.Pong": {
+        "api.pong": {
             "type": "object",
             "properties": {
                 "message": {
                     "type": "string"
                 }
             }
-        }
-    },
-    "securityDefinitions": {
-        "BasicAuth": {
-            "type": "basic"
+        },
+        "models.ErrorResponse": {
+            "type": "object",
+            "required": [
+                "error"
+            ],
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "bank unavailable"
+                }
+            }
+        },
+        "models.PostPaymentRequest": {
+            "type": "object",
+            "required": [
+                "amount",
+                "card_number",
+                "currency",
+                "cvv",
+                "expiry_month",
+                "expiry_year"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 100
+                },
+                "card_number": {
+                    "type": "string",
+                    "maxLength": 19,
+                    "minLength": 14,
+                    "example": "2222405343248877"
+                },
+                "currency": {
+                    "type": "string",
+                    "enum": [
+                        "GBP",
+                        "USD",
+                        "EUR"
+                    ],
+                    "example": "GBP"
+                },
+                "cvv": {
+                    "type": "string",
+                    "maxLength": 4,
+                    "minLength": 3,
+                    "example": "012"
+                },
+                "expiry_month": {
+                    "type": "integer",
+                    "maximum": 12,
+                    "minimum": 1,
+                    "example": 12
+                },
+                "expiry_year": {
+                    "type": "integer",
+                    "maximum": 9999,
+                    "minimum": 1,
+                    "example": 2099
+                }
+            }
+        },
+        "models.PostPaymentResponse": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "integer"
+                },
+                "card_number_last_four": {
+                    "type": "string",
+                    "maxLength": 4,
+                    "minLength": 4,
+                    "example": "8877"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "expiry_month": {
+                    "type": "integer"
+                },
+                "expiry_year": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "payment_status": {
+                    "type": "string",
+                    "enum": [
+                        "Authorized",
+                        "Declined"
+                    ],
+                    "example": "Authorized"
+                }
+            }
+        },
+        "models.RejectedPaymentResponse": {
+            "type": "object",
+            "required": [
+                "error",
+                "payment_status"
+            ],
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "invalid payment: amount must be positive"
+                },
+                "payment_status": {
+                    "type": "string",
+                    "enum": [
+                        "Rejected"
+                    ],
+                    "example": "Rejected"
+                }
+            }
         }
     }
 }
